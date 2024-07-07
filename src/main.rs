@@ -1,5 +1,5 @@
 extern crate image;
-use image::{GenericImageView, ImageBuffer, Rgba};
+use image::{ImageBuffer, Rgba};
 use std::io;
 use std::fs;
 use std::path::Path;
@@ -18,7 +18,7 @@ const GSF2: f32 = 0.114;
 fn clear_directory(dir_name: &str) -> io::Result<()> {
   let dir = Path::new(dir_name);
   if dir.exists() {
-    println!("Cleaning directory {}", dir_name);
+    println!("clean_directory(): Cleaning directory {}", dir_name);
     for entry in fs::read_dir(dir)? {
       let entry = entry?;
       let path = entry.path();
@@ -29,10 +29,10 @@ fn clear_directory(dir_name: &str) -> io::Result<()> {
       }
     }
   } else {
-    println!("Creating directory {}", dir_name);
+    println!("clean_directory(): Creating directory {}", dir_name);
     fs::create_dir_all(dir)?;
   }
-  println!("Successfully created/cleaned directory {}". dir_name);
+  println!("clean_directory(): Successfully created/cleaned directory {}", dir_name);
   Ok(())
 }
 
@@ -55,7 +55,7 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
   if !Path::new(vid_in_name).exists() {
     return Err(format!("apply_effects(): The video file {} does not exist.", vid_in_name).into());
   }
-  clean_directory(frames_dir)?;
+  clear_directory(frames_dir)?;
   let out_parts: Vec<&str> = vid_out_name.split("/").collect();
   let frame_outpart = out_parts.last().unwrap_or(&"").replace(".mp4", "");
   let ffmpeg_imgtype = match img_type {
@@ -63,10 +63,10 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
     "jpg" | ".jpg" => JPG,
     "png" | ".png" => PNG,
     _ => PNG,
-  }
+  };
   let _teardowncmd = if cfg!(target_os = "windows") {
     Command::new("cmd")
-    .args(["/C", &format!("ffmpeg -i {} -vf fps=30 {}{}_%04d{}", vid_in_name, frames_dir, frame_outpart, ffmpeg_imgtype)])
+    .args(["/C", &format!("ffmpeg -i {} -vf fps=30 {}/{}_%04d{}", vid_in_name, frames_dir, frame_outpart, ffmpeg_imgtype)])
     .output()
     .expect("apply_effects(): Failed to execute _teardowncmd")
   } else {
@@ -75,12 +75,12 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
     .arg("echo hello")
     .output()
     .expect("apply_effects(): Failed to execute _teardowncmd (not implemented for linux/macOS)")
-  }
+  };
   println!("apply_effects(): Successfully executed _teardowncmd to create {} source frames in {}", vid_in_name, frames_dir);
   for entry in fs::read_dir(frames_dir)? {
     let entry = entry?;
     let src_path = entry.path();
-    if let Some(extension) == src_path.extension().and_then(|s| s.to_str()) {
+    if let Some(extension) = src_path.extension().and_then(|s| s.to_str()) {
       if extension == ffmpeg_imgtype.strip_prefix('.').unwrap() {
         let mut img = image::open(&src_path)?.to_rgba8();
         for fx in effects {
@@ -88,15 +88,15 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
         }
         let src_framename = src_path.file_name().unwrap().to_string_lossy();
         let frame_num = src_framename.rsplit('_').next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
-        let new_framename = format!("{}{}_fx_{}{}", frames_dir, frame_outpart, frame_num, ffmpeg_imgtype)
+        let new_framename = format!("{}/{}_fx_{}{}", frames_dir, frame_outpart, frame_num, ffmpeg_imgtype);
         img.save(&new_framename)?;
         fs::remove_file(src_path)?;
       }
     }
   }
-  let _rebuildcmd = if cfg!(target_os == "windows") {
+  let _rebuildcmd = if cfg!(target_os = "windows") {
     Command::new("cmd")
-    .args(["/C", &format!("ffmpeg -y -framerate 30 -i {}{}_fx_%04d{} -c:v libx264 -pix_fmt yuv420p {}", framesdir, frame_outpart, vid_out_name, ffmpeg_imgtype)])
+    .args(["/C", &format!("ffmpeg -y -framerate 30 -i {}/{}_fx_%04d{} -c:v libx264 -pix_fmt yuv420p {}", frames_dir, frame_outpart, ffmpeg_imgtype, vid_out_name)])
     .output()
     .expect("apply_effects(): Failed to execute _rebuildcmd")
   } else {
@@ -104,18 +104,18 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
     .arg("-c")
     .arg("echo hello")
     .output()
-    .excpect("apply_effects(): Failed to execute _rebuildcmd (not implemented for linux/macOS)")
-  }
+    .expect("apply_effects(): Failed to execute _rebuildcmd (not implemented for linux/macOS)")
+  };
   println!("apply_effects(): Successfully executed _rebuildcmd to generate {} from {} source frames in {} with effects list applied", vid_out_name, vid_in_name, frames_dir);
   Ok(())
 }
 
 fn main() -> io::Result<()> {
-  let vid_in_name = VIDIN+"ants.mp4";
-  let frames_dir = IMGOUT+"ants0";
-  let vid_out_name = VIDOUT+"ants0.mp4";
+  let vid_in_name = VIDIN.to_owned()+"ants.mp4";
+  let frames_dir = IMGOUT.to_owned()+"ants0";
+  let vid_out_name = VIDOUT.to_owned()+"ants0.mp4";
   let image_type = "png";
   let fx: Vec<Effect> = vec![color_invert, color_grayscale];
-  apply_effects(vid_in_name, frames_dir, vid_out_name, image_type, fx)?;
+  let _ = apply_effects(&vid_in_name, &frames_dir, &vid_out_name, &image_type, &fx);
   Ok(())
 }
