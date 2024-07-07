@@ -1,5 +1,7 @@
 extern crate image;
 use image::{ImageBuffer, Rgba};
+extern crate regex;
+use regex::Regex;
 use std::io;
 use std::fs;
 use std::path::Path;
@@ -9,7 +11,6 @@ const IMGOUT: &str = "img_out/";
 const VIDIN: &str = "vid_in/";
 const VIDOUT: &str = "vid_out/";
 const BMP: &str = ".bmp";
-const JPG: &str = ".jpg";
 const PNG: &str = ".png";
 const GSF0: f32 = 0.299;
 const GSF1: f32 = 0.587;
@@ -36,7 +37,21 @@ fn clear_directory(dir_name: &str) -> io::Result<()> {
   Ok(())
 }
 
-type Effect = fn(&mut ImageBuffer<Rgba<u8>, Vec<u8>>);
+enum Effect {
+  ColorInvert,
+  ColorGrayscale,
+  ColorFilter(f32, f32, f32),
+}
+
+impl Effect {
+  fn apply(&self, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
+    match *self {
+      Effect::ColorInvert => color_invert(img),
+      Effect::ColorGrayscale => color_grayscale(img),
+      Effect::ColorFilter(r, g, b) => color_filter(img, r, g, b),
+    }
+  }
+}
 
 fn color_invert(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
   for pixel in img.pixels_mut() {
@@ -51,6 +66,14 @@ fn color_grayscale(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
   }
 }
 
+fn color_filter(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, r: f32, g: f32, b: f32) {
+  for pixel in img.pixels_mut() {
+    pixel[0] = (pixel[0] as f32 * r) as u8;
+    pixel[1] = (pixel[1] as f32 * g) as u8;
+    pixel[2] = (pixel[2] as f32 * b) as u8;
+  }
+}
+
 fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_type: &str, effects: &[Effect]) -> Result<(), Box<dyn std::error::Error>> {
   if !Path::new(vid_in_name).exists() {
     return Err(format!("apply_effects(): The video file {} does not exist.", vid_in_name).into());
@@ -60,7 +83,6 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
   let frame_outpart = out_parts.last().unwrap_or(&"").replace(".mp4", "");
   let ffmpeg_imgtype = match img_type {
     "bmp" | ".bmp" => BMP,
-    "jpg" | ".jpg" => JPG,
     "png" | ".png" => PNG,
     _ => PNG,
   };
@@ -77,6 +99,7 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
     .expect("apply_effects(): Failed to execute _teardowncmd (not implemented for linux/macOS)")
   };
   println!("apply_effects(): Successfully executed _teardowncmd to create {} source frames in {}", vid_in_name, frames_dir);
+  let re = Regex::new(r"(?P<name>.+)_(?P<number>\d+)\.\w+").unwrap();
   for entry in fs::read_dir(frames_dir)? {
     let entry = entry?;
     let src_path = entry.path();
@@ -84,13 +107,16 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
       if extension == ffmpeg_imgtype.strip_prefix('.').unwrap() {
         let mut img = image::open(&src_path)?.to_rgba8();
         for fx in effects {
-          fx(&mut img);
+          fx.apply(&mut img);
         }
         let src_framename = src_path.file_name().unwrap().to_string_lossy();
-        let frame_num = src_framename.rsplit('_').next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
-        let new_framename = format!("{}/{}_fx_{}{}", frames_dir, frame_outpart, frame_num, ffmpeg_imgtype);
-        img.save(&new_framename)?;
-        fs::remove_file(src_path)?;
+        if let Some(captures) = re.captures(&src_framename) {
+          let frame_num = captures["number"].parse::<u32>().unwrap_or(0);
+          let new_framename = format!("{}/{}_fx_{:04}{}", frames_dir, frame_outpart, frame_num, ffmpeg_imgtype);
+          img.save(&new_framename)?;
+        } else {
+            println!("Warning: Failed to extract frame number from filename: {}", src_framename);
+        }
       }
     }
   }
@@ -107,15 +133,23 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
     .expect("apply_effects(): Failed to execute _rebuildcmd (not implemented for linux/macOS)")
   };
   println!("apply_effects(): Successfully executed _rebuildcmd to generate {} from {} source frames in {} with effects list applied", vid_out_name, vid_in_name, frames_dir);
+  for entry in fs::read_dir(frames_dir)? {
+    let entry = entry?;
+    let img_path = entry.path();
+    let img_name = img_path.file_name().unwrap().to_string_lossy();
+    if !img_name.contains("_fx_") {
+      fs::remove_file(img_path)?;
+    }
+  }
   Ok(())
 }
 
 fn main() -> io::Result<()> {
   let vid_in_name = VIDIN.to_owned()+"ants.mp4";
-  let frames_dir = IMGOUT.to_owned()+"ants0";
-  let vid_out_name = VIDOUT.to_owned()+"ants0.mp4";
+  let frames_dir = IMGOUT.to_owned()+"ants1";
+  let vid_out_name = VIDOUT.to_owned()+"ants1.mp4";
   let image_type = "png";
-  let fx: Vec<Effect> = vec![color_invert, color_grayscale];
+  let fx: Vec<Effect> = vec![Effect::ColorFilter(0.5, 1.0, 0.5), Effect::ColorInvert];
   let _ = apply_effects(&vid_in_name, &frames_dir, &vid_out_name, &image_type, &fx);
   Ok(())
 }
