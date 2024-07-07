@@ -55,13 +55,13 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
   if !Path::new(vid_in_name).exists() {
     return Err(format!("apply_effects(): The video file {} does not exist.", vid_in_name).into());
   }
-  clean_directory(frames_dir);
+  clean_directory(frames_dir)?;
   let out_parts: Vec<&str> = vid_out_name.split("/").collect();
   let frame_outpart = out_parts.last().unwrap_or(&"").replace(".mp4", "");
   let ffmpeg_imgtype = match img_type {
-    "bmp" => BMP,
-    "jpg" => JPG,
-    "png" => PNG,
+    "bmp" | ".bmp" => BMP,
+    "jpg" | ".jpg" => JPG,
+    "png" | ".png" => PNG,
     _ => PNG,
   }
   let _teardowncmd = if cfg!(target_os = "windows") {
@@ -114,7 +114,8 @@ fn main() -> io::Result<()> {
   let vid_in_name = VIDIN+"ants.mp4";
   let frames_dir = IMGOUT+"ants0";
   let vid_out_name = VIDOUT+"ants0.mp4";
+  let image_type = "png";
   let fx: Vec<Effect> = vec![color_invert, color_grayscale];
-  apply_effects(vid_in_name, frames_dir, vid_out_name, "png", fx)?;
+  apply_effects(vid_in_name, frames_dir, vid_out_name, image_type, fx)?;
   Ok(())
 }
