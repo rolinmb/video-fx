@@ -52,6 +52,16 @@ enum Effect {
   DiscreteCosine(u32),
   DiscreteSine(u32),
   FsDither,
+  GenInterp(
+    f64,
+    f64,
+    Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
+    Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
+    Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
+    Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
+    Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
+    Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
+  ),
 }
 
 impl Effect {
@@ -64,6 +74,9 @@ impl Effect {
       Effect::DiscreteCosine(block_size) => discrete_cosine(img, block_size),
       Effect::DiscreteSine(block_size) => discrete_sine(img, block_size),
       Effect::FsDither => fs_dither(img),
+      Effect::GenInterp(iratio, scale, ref f_r, ref f_g, ref f_b, ref fr_theta, ref fg_theta, ref fb_theta) => {
+        gen_interp(img, iratio, scale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta);
+      }
     }
   }
 }
@@ -208,24 +221,6 @@ fn discrete_sine(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, block_size: u32) {
   *img = dst_img;
 }
 
-fn nearest_pixel(src_pixel: Rgba<u8>) -> Rgba<u8> {
-  Rgba([src_pixel[0], src_pixel[1], src_pixel[2], 255])
-}
-
-fn pixel_delta(p1: Rgba<u8>, p2: Rgba<u8>) -> [i32; 3] {
-  [(p1[0] as i32) - (p2[0] as i32), (p1[1] as i32) - (p2[1] as i32), (p1[2] as i32) - (p2[2] as i32)]
-}
-
-fn distribute_err(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, x: u32, y: u32, q_err: [i32; 3], factor: f64) {
-  if x < img.width() && y < img.height() {
-    let mut pixel = img.get_pixel(x, y).0;
-    pixel[0] = (pixel[0] as f64 + (q_err[0] as f64 * factor)).clamp(0.0, 255.0) as u8;
-    pixel[1] = (pixel[1] as f64 + (q_err[1] as f64 * factor)).clamp(0.0, 255.0) as u8;
-    pixel[2] = (pixel[2] as f64 + (q_err[2] as f64 * factor)).clamp(0.0, 255.0) as u8;
-    img.put_pixel(x, y, Rgba([pixel[0], pixel[1], pixel[2], 255]));
-  }
-}
-
 fn fs_dither(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
   let (width, height) = img.dimensions();
   let mut img_buffer = img.clone();
@@ -259,6 +254,29 @@ fn fs_dither(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
     }
   }
   *img = img_buffer;
+}
+
+fn gen_interp(
+  img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+  iratio: f64,scale: f64,
+  f_r: impl Fn(f64, f64) -> f64 + Clone,
+  f_g: impl Fn(f64, f64) -> f64 + Clone,
+  f_b: impl Fn(f64, f64) -> f64 + Clone,
+  fr_theta: impl Fn(f64, f64) -> f64 + Clone,
+  fg_theta: impl Fn(f64, f64) -> f64 + Clone,
+  fb_theta: impl Fn(f64, f64) -> f64 + Clone,
+) {
+  for (x, y, pixel) in img.enumerate_pixels_mut() {
+    let gen_r = (fr_theta(x as f64, y as f64) * scale * f_r.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
+    let gen_g = (fg_theta(x as f64, y as f64) * scale * f_g.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
+    let gen_b = (fb_theta(x as f64, y as f64) * scale * f_b.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
+    pixel.0 = [
+      (pixel.0[0] as f64 * iratio + (1.0 - iratio) * gen_r as f64).round() as u8,
+      (pixel.0[1] as f64 * iratio + (1.0 - iratio) * gen_g as f64).round() as u8,
+      (pixel.0[2] as f64 * iratio + (1.0 - iratio) * gen_b as f64).round() as u8,
+      255,
+    ];
+  }
 }
 
 fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_type: &str, effects: &[Effect]) -> Result<(), Box<dyn std::error::Error>> {
@@ -333,10 +351,21 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
 
 fn main() -> io::Result<()> {
   let vid_in_name = VIDIN.to_owned()+"ants.mp4";
-  let frames_dir = IMGOUT.to_owned()+"ants6";
-  let vid_out_name = VIDOUT.to_owned()+"ants6.mp4";
+  let frames_dir = IMGOUT.to_owned()+"ants7";
+  let vid_out_name = VIDOUT.to_owned()+"ants7.mp4";
   let image_type = "png";
-  let fx: Vec<Effect> = vec![Effect::FsDither];
+  let fx: Vec<Effect> = vec![
+    Effect::GenInterp(
+      0.5,
+      2.0,
+      Box::new(|x, y| x * y),
+      Box::new(|x, y| x + y),
+      Box::new(|x, y| x - y),
+      Box::new(|x, _y| x.sin()),
+      Box::new(|_x, y| y.cos()),
+      Box::new(|x, y| (x * y).tan()),
+    ),
+  ];
   let _ = apply_effects(&vid_in_name, &frames_dir, &vid_out_name, &image_type, &fx);
   Ok(())
 }
