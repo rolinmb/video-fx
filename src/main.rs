@@ -1,5 +1,5 @@
 extern crate image;
-use image::{ImageBuffer, Rgba};
+use image::{GenericImage, ImageBuffer, Rgba};
 extern crate regex;
 use regex::Regex;
 use std::io;
@@ -228,28 +228,37 @@ fn distribute_err(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, x: u32, y: u32, q_er
 
 fn fs_dither(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
   let (width, height) = img.dimensions();
-  let mut dither_img = img.clone();
+  let mut img_buffer = img.clone();
   for y in 0..height {
     for x in 0..width {
-      let old_pixel = *dither_img.get_pixel(x, y);
-      let new_pixel = nearest_pixel(old_pixel);
-      dither_img.put_pixel(x, y, new_pixel);
-      let q_err = pixel_delta(old_pixel, new_pixel);
+      let old_pixel = img_buffer.get_pixel(x, y).0;
+      let gray = (GSF0 * old_pixel[0] as f32 + GSF1 * old_pixel[1] as f32 + GSF2 * old_pixel[2] as f32) as u8;
+      let new_pixel = if gray > 128 { 255 } else { 0 };
+      let error = gray as f64 - new_pixel as f64;
+      img_buffer.put_pixel(x, y, Rgba([new_pixel, new_pixel, new_pixel, old_pixel[3]]));
       if x + 1 < width {
-        distribute_err(&mut dither_img, x + 1, y, q_err, FDF0);
-      }
-      if x > 0 && y + 1 < height {
-        distribute_err(&mut dither_img, x - 1, y + 1, q_err, FDF1);
+        let pixel = img_buffer.get_pixel_mut(x + 1, y).0;
+        let corrected = (pixel[0] as f64 + error * FDF0).clamp(0.0, 255.0) as u8;
+        img_buffer.put_pixel(x + 1, y, Rgba([corrected, corrected, corrected, pixel[3]]));
       }
       if y + 1 < height {
-        distribute_err(&mut dither_img, x, y + 1, q_err, FDF2);
-      }
-      if x + 1 < width && y + 1 < height {
-        distribute_err(&mut dither_img, x + 1, y + 1, q_err, FDF3);
+        if x > 0 {
+          let pixel = img_buffer.get_pixel_mut(x - 1, y + 1).0;
+          let corrected = (pixel[0] as f64 + error * FDF1).clamp(0.0, 255.0) as u8;
+          img_buffer.put_pixel(x - 1, y + 1, Rgba([corrected, corrected, corrected, pixel[3]]));
+        }
+        let pixel = img_buffer.get_pixel_mut(x, y + 1).0;
+        let corrected = (pixel[0] as f64 + error * FDF2).clamp(0.0, 255.0) as u8;
+        img_buffer.put_pixel(x, y + 1, Rgba([corrected, corrected, corrected, pixel[3]]));
+        if x + 1 < width {
+          let pixel = img_buffer.get_pixel_mut(x + 1, y + 1).0;
+          let corrected = (pixel[0] as f64 + error * FDF3).clamp(0.0, 255.0) as u8;
+          img_buffer.put_pixel(x + 1, y + 1, Rgba([corrected, corrected, corrected, pixel[3]]));
+        }
       }
     }
   }
-  *img = dither_img;
+  *img = img_buffer;
 }
 
 fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_type: &str, effects: &[Effect]) -> Result<(), Box<dyn std::error::Error>> {
@@ -324,8 +333,8 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
 
 fn main() -> io::Result<()> {
   let vid_in_name = VIDIN.to_owned()+"ants.mp4";
-  let frames_dir = IMGOUT.to_owned()+"ants5";
-  let vid_out_name = VIDOUT.to_owned()+"ants5.mp4";
+  let frames_dir = IMGOUT.to_owned()+"ants6";
+  let vid_out_name = VIDOUT.to_owned()+"ants6.mp4";
   let image_type = "png";
   let fx: Vec<Effect> = vec![Effect::FsDither];
   let _ = apply_effects(&vid_in_name, &frames_dir, &vid_out_name, &image_type, &fx);
