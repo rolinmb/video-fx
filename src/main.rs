@@ -18,6 +18,10 @@ const PNG: &str = ".png";
 const GSF0: f32 = 0.299;
 const GSF1: f32 = 0.587;
 const GSF2: f32 = 0.114;
+const FDF0: f64 = 7.0 / 16.0;
+const FDF1: f64 = 3.0 / 16.0;
+const FDF2: f64 = 5.0 / 16.0;
+const FDF3: f64 = 1.0 / 16.0;
 
 fn clear_directory(dir_name: &str) -> io::Result<()> {
   let dir = Path::new(dir_name);
@@ -46,6 +50,8 @@ enum Effect {
   ColorFilter(f32, f32, f32),
   EdgeDetect,
   DiscreteCosine(u32),
+  DiscreteSine(u32),
+  FsDither,
 }
 
 impl Effect {
@@ -56,6 +62,8 @@ impl Effect {
       Effect::ColorFilter(r, g, b) => color_filter(img, r, g, b),
       Effect::EdgeDetect => edge_detect(img),
       Effect::DiscreteCosine(block_size) => discrete_cosine(img, block_size),
+      Effect::DiscreteSine(block_size) => discrete_sine(img, block_size),
+      Effect::FsDither => fs_dither(img),
     }
   }
 }
@@ -133,7 +141,7 @@ fn extract_block(img: &ImageBuffer<Rgba<u8>, Vec<u8>>, x: u32, y: u32, block_siz
       let px = x + j;
       let py = y + i;
       if px < width && py < height {
-        let pixel = img.get_pixel(x, y);
+        let pixel = img.get_pixel(px, py);
         let gray = pixel[0] as f64 / 255.0;
         block[i as usize][j as usize] = gray;
       }
@@ -143,11 +151,14 @@ fn extract_block(img: &ImageBuffer<Rgba<u8>, Vec<u8>>, x: u32, y: u32, block_siz
 }
 
 fn store_block(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, block: Vec<Vec<f64>>, x: u32, y: u32, block_size: u32) {
+  let (width, height) = img.dimensions();
   for i in 0..block_size {
     for j in 0..block_size {
-      let val = block[i as usize][j as usize];
-      let gray = (val.clamp(0.0, 1.0) * 255.0) as u8;
-      img.put_pixel(x + j, y + i, Rgba([gray, gray, gray, 255]));
+      if x + j < width && y + i < height {
+        let val = block[i as usize][j as usize];
+        let gray = (val.clamp(0.0, 1.0) * 255.0) as u8;
+        img.put_pixel(x + j, y + i, Rgba([gray, gray, gray, 255]));
+      }
     }
   }
 }
@@ -163,6 +174,82 @@ fn discrete_cosine(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, block_size: u32) {
     }
   }
   *img = dct_img;
+}
+
+fn dst_step(block: &Vec<Vec<f64>>) -> Vec<Vec<f64>> {
+  let n = block.len();
+  let mut dst = vec![vec![0.0; n]; n];
+  for u in 0..n {
+    for v in 0..n {
+      let mut sum = 0.0;
+      for i in 0..n {
+        for j in 0..n {
+          sum += block[i][j]
+            * ((i as f64 + 0.5) * u as f64 * PI / n as f64).sin()
+            * ((j as f64 + 0.5) * v as f64 * PI / n as f64).sin();
+        }
+      }
+      dst[u][v] = sum * (2.0 / (n as f64).sqrt());
+    }
+  }
+  dst
+}
+
+fn discrete_sine(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, block_size: u32) {
+  let (width, height) = img.dimensions();
+  let mut dst_img = img.clone();
+  for y in (0..height).step_by(block_size as usize) {
+    for x in (0..width).step_by(block_size as usize) {
+      let block = extract_block(img, x, y, block_size);
+      let dst_block = dst_step(&block);
+      store_block(&mut dst_img, dst_block, x, y, block_size);
+    }
+  }
+  *img = dst_img;
+}
+
+fn nearest_pixel(src_pixel: Rgba<u8>) -> Rgba<u8> {
+  Rgba([src_pixel[0], src_pixel[1], src_pixel[2], 255])
+}
+
+fn pixel_delta(p1: Rgba<u8>, p2: Rgba<u8>) -> [i32; 3] {
+  [(p1[0] as i32) - (p2[0] as i32), (p1[1] as i32) - (p2[1] as i32), (p1[2] as i32) - (p2[2] as i32)]
+}
+
+fn distribute_err(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, x: u32, y: u32, q_err: [i32; 3], factor: f64) {
+  if x < img.width() && y < img.height() {
+    let mut pixel = img.get_pixel(x, y).0;
+    pixel[0] = (pixel[0] as f64 + (q_err[0] as f64 * factor)).clamp(0.0, 255.0) as u8;
+    pixel[1] = (pixel[1] as f64 + (q_err[1] as f64 * factor)).clamp(0.0, 255.0) as u8;
+    pixel[2] = (pixel[2] as f64 + (q_err[2] as f64 * factor)).clamp(0.0, 255.0) as u8;
+    img.put_pixel(x, y, Rgba([pixel[0], pixel[1], pixel[2], 255]));
+  }
+}
+
+fn fs_dither(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
+  let (width, height) = img.dimensions();
+  let mut dither_img = img.clone();
+  for y in 0..height {
+    for x in 0..width {
+      let old_pixel = *dither_img.get_pixel(x, y);
+      let new_pixel = nearest_pixel(old_pixel);
+      dither_img.put_pixel(x, y, new_pixel);
+      let q_err = pixel_delta(old_pixel, new_pixel);
+      if x + 1 < width {
+        distribute_err(&mut dither_img, x + 1, y, q_err, FDF0);
+      }
+      if x > 0 && y + 1 < height {
+        distribute_err(&mut dither_img, x - 1, y + 1, q_err, FDF1);
+      }
+      if y + 1 < height {
+        distribute_err(&mut dither_img, x, y + 1, q_err, FDF2);
+      }
+      if x + 1 < width && y + 1 < height {
+        distribute_err(&mut dither_img, x + 1, y + 1, q_err, FDF3);
+      }
+    }
+  }
+  *img = dither_img;
 }
 
 fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_type: &str, effects: &[Effect]) -> Result<(), Box<dyn std::error::Error>> {
@@ -206,7 +293,7 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
           let new_framename = format!("{}/{}_fx_{:04}{}", frames_dir, frame_outpart, frame_num, ffmpeg_imgtype);
           img.save(&new_framename)?;
         } else {
-            println!("Warning: Failed to extract frame number from filename: {}", src_framename);
+          println!("Warning: Failed to extract frame number from filename: {}", src_framename);
         }
       }
     }
@@ -237,10 +324,10 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
 
 fn main() -> io::Result<()> {
   let vid_in_name = VIDIN.to_owned()+"ants.mp4";
-  let frames_dir = IMGOUT.to_owned()+"ants3";
-  let vid_out_name = VIDOUT.to_owned()+"ants3.mp4";
+  let frames_dir = IMGOUT.to_owned()+"ants5";
+  let vid_out_name = VIDOUT.to_owned()+"ants5.mp4";
   let image_type = "png";
-  let fx: Vec<Effect> = vec![Effect::DiscreteCosine(8u32)];
+  let fx: Vec<Effect> = vec![Effect::FsDither];
   let _ = apply_effects(&vid_in_name, &frames_dir, &vid_out_name, &image_type, &fx);
   Ok(())
 }
