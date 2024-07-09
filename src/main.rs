@@ -6,7 +6,10 @@ use std::io;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::f64::consts::PI;
 
+const SOBELHORIZ: [f32; 9] = [-1.0, 0.0, 1.0, -2.0, 0.0, 2.0, -1.0, 0.0, 1.0];
+const SOBELVERTI: [f32; 9] = [-1.0, -2.0, -1.0, 0.0, 0.0, 0.0, 1.0, 2.0, 1.0];
 const IMGOUT: &str = "img_out/";
 const VIDIN: &str = "vid_in/";
 const VIDOUT: &str = "vid_out/";
@@ -41,6 +44,8 @@ enum Effect {
   ColorInvert,
   ColorGrayscale,
   ColorFilter(f32, f32, f32),
+  EdgeDetect,
+  DiscreteCosine(u32),
 }
 
 impl Effect {
@@ -49,6 +54,8 @@ impl Effect {
       Effect::ColorInvert => color_invert(img),
       Effect::ColorGrayscale => color_grayscale(img),
       Effect::ColorFilter(r, g, b) => color_filter(img, r, g, b),
+      Effect::EdgeDetect => edge_detect(img),
+      Effect::DiscreteCosine(block_size) => discrete_cosine(img, block_size),
     }
   }
 }
@@ -72,6 +79,90 @@ fn color_filter(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, r: f32, g: f32, b: f32
     pixel[1] = (pixel[1] as f32 * g) as u8;
     pixel[2] = (pixel[2] as f32 * b) as u8;
   }
+}
+
+fn edge_detect(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
+  let (width, height) = img.dimensions();
+  let mut sobel_img = ImageBuffer::new(width, height);
+  for y in 1..(height-1) {
+    for x in 1..(width-1) {
+      let mut gx = 0.0;
+      let mut gy = 0.0;
+      for ky in 0..3 {
+        for kx in 0..3 {
+          let pixel = img.get_pixel(x + kx - 1, y + ky -1).0;
+          let intensity = (pixel[0] as f32 + pixel[1] as f32 + pixel[2] as f32) / 3.0;
+          gx += intensity * SOBELHORIZ[(ky * 3 + kx) as usize];
+          gy += intensity * SOBELVERTI[(ky * 3 + kx) as usize];
+        }
+      }
+      let magnitude = ((gx * gx + gy * gy).sqrt()) as u8;
+      sobel_img.put_pixel(x, y, Rgba([magnitude, magnitude, magnitude, 255]));
+    }
+  }
+  *img = sobel_img;
+}
+
+fn dct_step(block: &Vec<Vec<f64>>) -> Vec<Vec<f64>> {
+  let n = block.len();
+  let mut dct = vec![vec![0.0; n]; n];
+  let sqrt2 = (2.0f64).sqrt();
+  for u in 0..n {
+    for v in 0..n {
+      let mut sum = 0.0;
+      for i in 0..n {
+        for j in 0..n {
+          let cu = if u == 0 { 1.0 / sqrt2 } else { 1.0 };
+          let cv = if v == 0 { 1.0 / sqrt2 } else { 1.0 };
+          sum += cu * cv * block[i][j]
+            * ((2.0 * i as f64 + 1.0) * u as f64 * PI / (2.0 * n as f64)).cos()
+            * ((2.0 * j as f64 + 1.0) * v as f64 * PI / (2.0 * n as f64)).cos();
+        }
+      }
+      dct[u][v] = sum * (2.0 / (n as f64).sqrt());
+    }
+  }
+  dct
+}
+
+fn extract_block(img: &ImageBuffer<Rgba<u8>, Vec<u8>>, x: u32, y: u32, block_size: u32) -> Vec<Vec<f64>> {
+  let mut block = vec![vec![0.0; block_size as usize]; block_size as usize];
+  let (width, height) = img.dimensions();
+  for i in 0..block_size {
+    for j in 0..block_size {
+      let px = x + j;
+      let py = y + i;
+      if px < width && py < height {
+        let pixel = img.get_pixel(x, y);
+        let gray = pixel[0] as f64 / 255.0;
+        block[i as usize][j as usize] = gray;
+      }
+    }
+  }
+  block
+}
+
+fn store_block(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, block: Vec<Vec<f64>>, x: u32, y: u32, block_size: u32) {
+  for i in 0..block_size {
+    for j in 0..block_size {
+      let val = block[i as usize][j as usize];
+      let gray = (val.clamp(0.0, 1.0) * 255.0) as u8;
+      img.put_pixel(x + j, y + i, Rgba([gray, gray, gray, 255]));
+    }
+  }
+}
+
+fn discrete_cosine(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, block_size: u32) {
+  let (width, height) = img.dimensions();
+  let mut dct_img = img.clone();
+  for y in (0..height).step_by(block_size as usize) {
+    for x in (0..width).step_by(block_size as usize) {
+      let block = extract_block(img, x, y, block_size);
+      let dct_block = dct_step(&block);
+      store_block(&mut dct_img, dct_block, x, y, block_size);
+    }
+  }
+  *img = dct_img;
 }
 
 fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_type: &str, effects: &[Effect]) -> Result<(), Box<dyn std::error::Error>> {
@@ -146,10 +237,10 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
 
 fn main() -> io::Result<()> {
   let vid_in_name = VIDIN.to_owned()+"ants.mp4";
-  let frames_dir = IMGOUT.to_owned()+"ants1";
-  let vid_out_name = VIDOUT.to_owned()+"ants1.mp4";
+  let frames_dir = IMGOUT.to_owned()+"ants3";
+  let vid_out_name = VIDOUT.to_owned()+"ants3.mp4";
   let image_type = "png";
-  let fx: Vec<Effect> = vec![Effect::ColorFilter(0.5, 1.0, 0.5), Effect::ColorInvert];
+  let fx: Vec<Effect> = vec![Effect::DiscreteCosine(8u32)];
   let _ = apply_effects(&vid_in_name, &frames_dir, &vid_out_name, &image_type, &fx);
   Ok(())
 }
