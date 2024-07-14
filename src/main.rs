@@ -55,6 +55,8 @@ enum Effect {
   GenInterp(
     f64,
     f64,
+    f64,
+    f64,
     Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
     Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
     Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
@@ -74,8 +76,8 @@ impl Effect {
       Effect::DiscreteCosine(block_size) => discrete_cosine(img, block_size),
       Effect::DiscreteSine(block_size) => discrete_sine(img, block_size),
       Effect::FsDither => fs_dither(img),
-      Effect::GenInterp(iratio, scale, ref f_r, ref f_g, ref f_b, ref fr_theta, ref fg_theta, ref fb_theta) => {
-        gen_interp(img, iratio, scale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta);
+      Effect::GenInterp(iratio, rscale, gscale, bscale, ref f_r, ref f_g, ref f_b, ref fr_theta, ref fg_theta, ref fb_theta) => {
+        gen_interp(img, iratio, rscale, gscale, bscale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta);
       }
     }
   }
@@ -258,7 +260,7 @@ fn fs_dither(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
 
 fn gen_interp(
   img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-  iratio: f64,scale: f64,
+  iratio: f64, rscale: f64, gscale: f64, bscale: f64,
   f_r: impl Fn(f64, f64) -> f64 + Clone,
   f_g: impl Fn(f64, f64) -> f64 + Clone,
   f_b: impl Fn(f64, f64) -> f64 + Clone,
@@ -267,9 +269,9 @@ fn gen_interp(
   fb_theta: impl Fn(f64, f64) -> f64 + Clone,
 ) {
   for (x, y, pixel) in img.enumerate_pixels_mut() {
-    let gen_r = (fr_theta(x as f64, y as f64) * scale * f_r.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
-    let gen_g = (fg_theta(x as f64, y as f64) * scale * f_g.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
-    let gen_b = (fb_theta(x as f64, y as f64) * scale * f_b.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
+    let gen_r = (fr_theta(x as f64, y as f64) * rscale * f_r.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
+    let gen_g = (fg_theta(x as f64, y as f64) * gscale * f_g.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
+    let gen_b = (fb_theta(x as f64, y as f64) * bscale * f_b.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
     pixel.0 = [
       (pixel.0[0] as f64 * iratio + (1.0 - iratio) * gen_r as f64).round() as u8,
       (pixel.0[1] as f64 * iratio + (1.0 - iratio) * gen_g as f64).round() as u8,
@@ -279,7 +281,7 @@ fn gen_interp(
   }
 }
 
-fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_type: &str, effects: &[Effect]) -> Result<(), Box<dyn std::error::Error>> {
+fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_type: &str, effects: &[Effect], iratio_init: f64, iratio_adj: f64) -> Result<(), Box<dyn std::error::Error>> {
   if !Path::new(vid_in_name).exists() {
     return Err(format!("apply_effects(): The video file {} does not exist.", vid_in_name).into());
   }
@@ -305,18 +307,30 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
   };
   println!("apply_effects(): Successfully executed _teardowncmd to create {} source frames in {}", vid_in_name, frames_dir);
   let re = Regex::new(r"(?P<name>.+)_(?P<number>\d+)\.\w+").unwrap();
+  let frame_count = fs::read_dir(frames_dir)?.count() as f64;
   for entry in fs::read_dir(frames_dir)? {
     let entry = entry?;
     let src_path = entry.path();
     if let Some(extension) = src_path.extension().and_then(|s| s.to_str()) {
       if extension == ffmpeg_imgtype.strip_prefix('.').unwrap() {
         let mut img = image::open(&src_path)?.to_rgba8();
-        for fx in effects {
-          fx.apply(&mut img);
-        }
         let src_framename = src_path.file_name().unwrap().to_string_lossy();
-        if let Some(captures) = re.captures(&src_framename) {
+        if let Some(captures) =re.captures(&src_framename) {
           let frame_num = captures["number"].parse::<u32>().unwrap_or(0);
+          let mut adjusted_iratio = iratio_init + (iratio_adj * ((frame_num as f64) / frame_count));
+          if adjusted_iratio > 0.999 {
+            adjusted_iratio = 0.999;
+          }
+          if adjusted_iratio < 0.0 {
+            adjusted_iratio = 0.0;
+          }
+          for fx in effects {
+            if let Effect::GenInterp(_iratio, rscale, gscale, bscale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta) = fx {
+              gen_interp(&mut img, adjusted_iratio, *rscale, *gscale, *bscale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta);
+            } else {
+              fx.apply(&mut img);
+            }
+          }
           let new_framename = format!("{}/{}_fx_{:04}{}", frames_dir, frame_outpart, frame_num, ffmpeg_imgtype);
           img.save(&new_framename)?;
         } else {
@@ -350,22 +364,29 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
 }
 
 fn main() -> io::Result<()> {
-  let vid_in_name = VIDIN.to_owned()+"ants.mp4";
-  let frames_dir = IMGOUT.to_owned()+"ants7";
-  let vid_out_name = VIDOUT.to_owned()+"ants7.mp4";
+  let vid_in_name = VIDIN.to_owned()+"morning_07122024.mp4";
+  let frames_dir = IMGOUT.to_owned()+"morning07122024";
+  let vid_out_name = VIDOUT.to_owned()+"morning07122024_1.mp4";
   let image_type = "png";
+  let interp_ratio = 0.5;
+  let interp_ratio_adj = 0.45;
+  let r_scale = 1.0;
+  let g_scale = 1.0;
+  let b_scale = 1.0;
   let fx: Vec<Effect> = vec![
     Effect::GenInterp(
-      0.5,
-      2.0,
-      Box::new(|x, y| x * y),
-      Box::new(|x, y| x + y),
-      Box::new(|x, y| x - y),
-      Box::new(|x, _y| x.sin()),
-      Box::new(|_x, y| y.cos()),
-      Box::new(|x, y| (x * y).tan()),
+      interp_ratio, // iratio
+      r_scale, // rscale
+      g_scale, // gscale
+      b_scale, // bscale
+      Box::new(|x, y| x * y), // f_r
+      Box::new(|x, y| x + y), // f_g
+      Box::new(|x, y| x - y), // f_b
+      Box::new(|x, _y| x.sin()), // fr_theta 
+      Box::new(|_x, y| y.cos()), // fg_theta
+      Box::new(|x, y| (x * y).tan()), // fb_theta
     ),
   ];
-  let _ = apply_effects(&vid_in_name, &frames_dir, &vid_out_name, &image_type, &fx);
+  let _ = apply_effects(&vid_in_name, &frames_dir, &vid_out_name, &image_type, &fx, interp_ratio, interp_ratio_adj);
   Ok(())
 }
