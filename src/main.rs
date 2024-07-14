@@ -54,9 +54,9 @@ enum Effect {
   FsDither,
   GenInterp(
     f64,
-    f64,
-    f64,
-    f64,
+    Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
+    Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
+    Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
     Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
     Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
     Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
@@ -76,8 +76,8 @@ impl Effect {
       Effect::DiscreteCosine(block_size) => discrete_cosine(img, block_size),
       Effect::DiscreteSine(block_size) => discrete_sine(img, block_size),
       Effect::FsDither => fs_dither(img),
-      Effect::GenInterp(iratio, rscale, gscale, bscale, ref f_r, ref f_g, ref f_b, ref fr_theta, ref fg_theta, ref fb_theta) => {
-        gen_interp(img, iratio, rscale, gscale, bscale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta);
+      Effect::GenInterp(iratio, ref f_rscale, ref f_gscale, ref f_bscale, ref f_r, ref f_g, ref f_b, ref fr_theta, ref fg_theta, ref fb_theta) => {
+        gen_interp(img, iratio, f_rscale, f_gscale, f_bscale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta);
       }
     }
   }
@@ -260,7 +260,10 @@ fn fs_dither(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
 
 fn gen_interp(
   img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-  iratio: f64, rscale: f64, gscale: f64, bscale: f64,
+  iratio: f64,
+  f_rscale: impl Fn(f64, f64) -> f64 + Clone,
+  f_gscale: impl Fn(f64, f64) -> f64 + Clone,
+  f_bscale: impl Fn(f64, f64) -> f64 + Clone,
   f_r: impl Fn(f64, f64) -> f64 + Clone,
   f_g: impl Fn(f64, f64) -> f64 + Clone,
   f_b: impl Fn(f64, f64) -> f64 + Clone,
@@ -269,9 +272,9 @@ fn gen_interp(
   fb_theta: impl Fn(f64, f64) -> f64 + Clone,
 ) {
   for (x, y, pixel) in img.enumerate_pixels_mut() {
-    let gen_r = (fr_theta(x as f64, y as f64) * rscale * f_r.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
-    let gen_g = (fg_theta(x as f64, y as f64) * gscale * f_g.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
-    let gen_b = (fb_theta(x as f64, y as f64) * bscale * f_b.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
+    let gen_r = (fr_theta(x as f64, y as f64) * f_rscale.clone()(x as f64, y as f64) * f_r.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
+    let gen_g = (fg_theta(x as f64, y as f64) * f_gscale.clone()(x as f64, y as f64) * f_g.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
+    let gen_b = (fb_theta(x as f64, y as f64) * f_bscale.clone()(x as f64, y as f64) * f_b.clone()(x as f64, y as f64)).max(0.0).min(255.0).round() as u8;
     pixel.0 = [
       (pixel.0[0] as f64 * iratio + (1.0 - iratio) * gen_r as f64).round() as u8,
       (pixel.0[1] as f64 * iratio + (1.0 - iratio) * gen_g as f64).round() as u8,
@@ -281,7 +284,12 @@ fn gen_interp(
   }
 }
 
-fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_type: &str, effects: &[Effect], iratio_init: f64, iratio_adj: f64) -> Result<(), Box<dyn std::error::Error>> {
+fn apply_effects(
+  vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_type: &str,
+  effects: &[Effect], iratio_init: f64, iratio_adj: f64,
+  mut rmult: f64, mut gmult: f64, mut bmult: f64,
+  rmult_adj: f64, gmult_adj: f64, bmult_adj: f64,
+) -> Result<(), Box<dyn std::error::Error>> {
   if !Path::new(vid_in_name).exists() {
     return Err(format!("apply_effects(): The video file {} does not exist.", vid_in_name).into());
   }
@@ -325,8 +333,11 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
             adjusted_iratio = 0.0;
           }
           for fx in effects {
-            if let Effect::GenInterp(_iratio, rscale, gscale, bscale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta) = fx {
-              gen_interp(&mut img, adjusted_iratio, *rscale, *gscale, *bscale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta);
+            if let Effect::GenInterp(_iratio, _f_rscale, _f_gscale, _f_bscale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta) = fx {
+              let new_f_rscale = Box::new(move |x, y| rmult * _f_rscale(x, y));
+              let new_f_gscale = Box::new(move |x, y| gmult * _f_gscale(x, y));
+              let new_f_bscale = Box::new(move |x, y| bmult * _f_bscale(x, y));
+              gen_interp(&mut img, adjusted_iratio, new_f_rscale, new_f_gscale, new_f_bscale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta);
             } else {
               fx.apply(&mut img);
             }
@@ -338,6 +349,9 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
         }
       }
     }
+    rmult += rmult_adj;
+    gmult += gmult_adj;
+    bmult += bmult_adj;
   }
   let _rebuildcmd = if cfg!(target_os = "windows") {
     Command::new("cmd")
@@ -366,27 +380,35 @@ fn apply_effects(vid_in_name: &str, frames_dir: &str, vid_out_name: &str, img_ty
 fn main() -> io::Result<()> {
   let vid_in_name = VIDIN.to_owned()+"morning_07122024.mp4";
   let frames_dir = IMGOUT.to_owned()+"morning07122024";
-  let vid_out_name = VIDOUT.to_owned()+"morning07122024_1.mp4";
+  let vid_out_name = VIDOUT.to_owned()+"morning07122024_3.mp4";
   let image_type = "png";
-  let interp_ratio = 0.5;
-  let interp_ratio_adj = 0.45;
-  let r_scale = 1.0;
-  let g_scale = 1.0;
-  let b_scale = 1.0;
+  let interp_ratio_init = 0.1;
+  let interp_ratio_adj = 0.85;
+  let r_multiplier = 1.0;
+  let r_multiplier_adj = 1.0;
+  let g_multiplier = 1.0;
+  let g_multiplier_adj = 1.0;
+  let b_multiplier = 1.0;
+  let b_multiplier_adj = 1.0;
   let fx: Vec<Effect> = vec![
     Effect::GenInterp(
-      interp_ratio, // iratio
-      r_scale, // rscale
-      g_scale, // gscale
-      b_scale, // bscale
-      Box::new(|x, y| x * y), // f_r
-      Box::new(|x, y| x + y), // f_g
-      Box::new(|x, y| x - y), // f_b
-      Box::new(|x, _y| x.sin()), // fr_theta 
-      Box::new(|_x, y| y.cos()), // fg_theta
-      Box::new(|x, y| (x * y).tan()), // fb_theta
+      interp_ratio_init, // iratio
+      Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // f_rscale
+      Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // f_gscale
+      Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // f_bscale
+      Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // f_r
+      Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // f_g
+      Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // f_b
+      Box::new(|x, _y| (x as f64).to_radians().sin()), // fr_theta 
+      Box::new(|_x, y| (y as f64).to_radians().cos()), // fg_theta
+      Box::new(|x, y| ((x + y) as f64).to_radians().tan()), // fb_theta
     ),
   ];
-  let _ = apply_effects(&vid_in_name, &frames_dir, &vid_out_name, &image_type, &fx, interp_ratio, interp_ratio_adj);
+  let _ = apply_effects(
+    &vid_in_name, &frames_dir, &vid_out_name, &image_type, &fx,
+    interp_ratio_init, interp_ratio_adj,
+    r_multiplier, g_multiplier, b_multiplier,
+    r_multiplier_adj, g_multiplier_adj, g_multiplier_adj,
+  );
   Ok(())
 }
