@@ -3,3 +3,4 @@ vid_out
 img_out
 cargo.lock
 /target
+go.sum

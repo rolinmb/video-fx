@@ -333,19 +333,21 @@ fn apply_effects(
             adjusted_iratio = 0.0;
           }
           for fx in effects {
-            if let Effect::GenInterp(_iratio, _f_rscale, _f_gscale, _f_bscale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta) = fx {
-              let new_f_rscale = Box::new(move |x, y| rmult * _f_rscale(x, y));
-              let new_f_gscale = Box::new(move |x, y| gmult * _f_gscale(x, y));
-              let new_f_bscale = Box::new(move |x, y| bmult * _f_bscale(x, y));
-              gen_interp(&mut img, adjusted_iratio, new_f_rscale, new_f_gscale, new_f_bscale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta);
-            } else {
-              fx.apply(&mut img);
+            match fx {
+              Effect::GenInterp(_iratio, f_rscale, f_gscale, f_bscale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta) => {
+                let new_f_rscale = Box::new(move |x, y| rmult * f_rscale(x, y));
+                let new_f_gscale = Box::new(move |x, y| gmult * f_gscale(x, y));
+                let new_f_bscale = Box::new(move |x, y| bmult * f_bscale(x, y));
+                //println!("apply_effects(): frame_num = {}, adjusted_iratio = {}, rmult = {}, gmult = {}, bmult = {}", frame_num, adjusted_iratio, rmult, gmult, bmult);
+                gen_interp(&mut img, adjusted_iratio, new_f_rscale, new_f_gscale, new_f_bscale, f_r, f_g, f_b, fr_theta, fg_theta, fb_theta);
+              }, 
+              _ => fx.apply(&mut img),
             }
           }
           let new_framename = format!("{}/{}_fx_{:04}{}", frames_dir, frame_outpart, frame_num, ffmpeg_imgtype);
           img.save(&new_framename)?;
         } else {
-          println!("Warning: Failed to extract frame number from filename: {}", src_framename);
+          println!("apply_effects(): Failed to extract frame number from filename: {}", src_framename);
         }
       }
     }
@@ -378,12 +380,12 @@ fn apply_effects(
 }
 
 fn main() -> io::Result<()> {
-  let vid_in_name = VIDIN.to_owned()+"morning_07122024.mp4";
-  let frames_dir = IMGOUT.to_owned()+"morning07122024";
-  let vid_out_name = VIDOUT.to_owned()+"morning07122024_3.mp4";
+  let vid_in_name = VIDIN.to_owned()+"lightningpa1.mp4";
+  let frames_dir = IMGOUT.to_owned()+"lightningpa";
+  let vid_out_name = VIDOUT.to_owned()+"lightningpa1_0.mp4";
   let image_type = "png";
-  let interp_ratio_init = 0.1;
-  let interp_ratio_adj = 0.85;
+  let interp_ratio_init = 0.6;
+  let interp_ratio_adj = 0.35;
   let r_multiplier = 1.0;
   let r_multiplier_adj = 1.0;
   let g_multiplier = 1.0;
@@ -399,16 +401,16 @@ fn main() -> io::Result<()> {
       Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // f_r
       Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // f_g
       Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // f_b
-      Box::new(|x, _y| (x as f64).to_radians().sin()), // fr_theta 
-      Box::new(|_x, y| (y as f64).to_radians().cos()), // fg_theta
-      Box::new(|x, y| ((x + y) as f64).to_radians().tan()), // fb_theta
-    ),
+      Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // fr_theta
+      Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // fg_theta
+      Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // fb_theta
+  ),
   ];
   let _ = apply_effects(
     &vid_in_name, &frames_dir, &vid_out_name, &image_type, &fx,
     interp_ratio_init, interp_ratio_adj,
     r_multiplier, g_multiplier, b_multiplier,
-    r_multiplier_adj, g_multiplier_adj, g_multiplier_adj,
+    r_multiplier_adj, g_multiplier_adj, b_multiplier_adj,
   );
   Ok(())
 }
