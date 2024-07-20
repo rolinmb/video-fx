@@ -5,21 +5,24 @@ import (
     "log"
     //"math"
     //"go/parser"
-    //"strings"
+    "strings"
     //"strconv"
-    //"image"
-    //"image/color"
+    "image"
+    "image/color"
     //"image/draw"
-    //"image/png"
+    "image/png"
+    "image/jpeg"
     "os"
-    //"os/exec"
-    //"io/ioutil"
+    "os/exec"
+    "io/ioutil"
 )
 
 const (
     VIDIN = "vid_in"
     VIDOUT = "vid_out"
     IMGOUT = "img_out"
+    PNG = "png"
+    JPEG = "jpg"
 )
 
 func checkAndCreateDir(dirName string) error {
@@ -50,9 +53,17 @@ func preRoutineCheck(videoInputName,framesDirName string) {
     if err != nil {
         log.Fatalf("preRoutineCheck(): ERROR :: Failed to create img_out: %v", err)
     }
-    err = checkAndCreateDir(IMGOUT+"/"+framesDirName)
-    if err != nil {
-        log.Fatalf("preRoutineCheck(): ERROR :: Failed to create img_out/%s: %v", framesDirName, err)
+    _, err = os.Stat(IMGOUT+"/"+framesDirName)
+    if os.IsNotExist(err) {
+        err = os.MkdirAll(IMGOUT+"/"+framesDirName, 0755)
+        if err != nil {
+            log.Fatalf("preRoutineCheck: ERROR :: Failed to create img_out/%s: %v", framesDirName)
+        }
+    } else {
+        fmt.Printf("\ncheckAndCreateDir(): The directory img_out/%s already exists; cleaning up...\n", framesDirName)
+        os.RemoveAll(IMGOUT+"/"+framesDirName)
+        os.MkdirAll(IMGOUT+"/"+framesDirName, 0755)
+        fmt.Printf("\npreRoutineCheck(): The previous contents of directory img_out/%s were successfully cleared\n", framesDirName)
     }
     fmt.Printf("\npreRoutineCheck(): All relevant IO directories and input video file %s exists\n", videoInputName)
 }
@@ -75,10 +86,81 @@ func distort(x,y,w,h int, amp,freq,phase float64) {
     return dx,dy
 }*/
 
-func videoFxRoutine(videoInName,framesDirName string) {
+func videoFxRoutine(videoInName,framesDirName,vidOutName,imgType string) {
+    if imgType != PNG && imgType != JPEG {
+        log.Fatalf("videoFxRoutine(): ERROR :: Entered parameter imgType = %s is not .png or .bmp; please chose either .png or .jpg", imgType)
+    }
     preRoutineCheck(videoInName,framesDirName)
+    vidInFullPath := VIDIN+"/"+videoInName
+    framesFullOutPath := IMGOUT+"/"+framesDirName
+    teardownCommand := exec.Command(
+        "ffmpeg", "-i", vidInFullPath,
+        "-vf", "fps=30", framesFullOutPath+"/"+framesDirName+"_%03d."+imgType,
+    )
+    teardownOutput, err := teardownCommand.CombinedOutput()
+    if err != nil {
+        log.Fatalf("videoFxRoutine(): ERROR :: An error occured while running teardownCommand -> \n\n%s\n(%v)", string(teardownOutput), err)
+    }
+    fmt.Printf("\nvideoFxRoutine(): teardownCommand Output -> \n\n%s\n(Successfully created frames from source video %s in output directory %s)\n", string(teardownOutput), vidInFullPath, framesFullOutPath)
+    framesFnames, err := ioutil.ReadDir(framesFullOutPath)
+    if err != nil {
+        log.Fatalf("videoFxRoutine(): ERROR :: An error occured while trying to read the names of frame files in %s: %v", framesFullOutPath, err)
+    }
+    // TODO: implement generation logic
+    for _, srcFrameFile := range framesFnames {
+        frameFullName := framesFullOutPath+"/"+srcFrameFile.Name()
+        rawFrameBytes, err := os.Open(frameFullName)
+        if err != nil {
+            log.Fatalf("videoFxRoutine(): ERROR ::  An error occured while loading source frame bytes %s: %v", frameFullName, err)
+        }
+        frameImage, _, err := image.Decode(rawFrameBytes)
+        if err != nil {
+            log.Fatalf("videoFxRoutine(): ERROR :: An error occured while deocuding source frame bytes %s: %v", frameFullName, err)
+        }
+        resultFrameRgba := image.NewRGBA(image.Rect(0, 0, frameImage.Bounds().Max.X, frameImage.Bounds().Max.Y))
+        for y := 0; y < frameImage.Bounds().Max.Y; y++ {
+            for x := 0; x < frameImage.Bounds().Max.X; x++ {
+                rSrc,gSrc,bSrc,aSrc := frameImage.At(x, y).RGBA()
+                resultFrameRgba.Set(x, y, color.RGBA{uint8(rSrc), uint8(gSrc), uint8(bSrc), uint8(aSrc)}) // For now we are just copying
+            }
+        }
+        segments := strings.Split(srcFrameFile.Name(), "_")
+        idxStr := strings.Replace(segments[len(segments)-1], "."+imgType, "", -1)
+        newFrameFname := fmt.Sprintf("%s/%s_fx_%s.%s", framesFullOutPath, framesDirName, idxStr, imgType)
+        newFrameFile, err := os.Create(newFrameFname)
+        if err != nil {
+            log.Fatalf("videoFxRoutine(): ERROR :: An error occured while creating newFrameFile location %s/%s_fx_%s.%s: %v", framesFullOutPath, framesDirName, idxStr, imgType, err)
+        }
+        if strings.ToLower(imgType) == PNG {
+            err = png.Encode(newFrameFile, resultFrameRgba)
+        } else if strings.ToLower(imgType) == JPEG {
+            err = jpeg.Encode(newFrameFile, resultFrameRgba, nil)
+        }
+        if err != nil {
+            log.Fatalf("videoFxRoutine(): ERROR :: An error occured while saving newFrameFile %s/%s_fx_%s.%s: %v", framesFullOutPath, framesDirName, idxStr, imgType, err)
+        }
+        newFrameFile.Close()
+        rawFrameBytes.Close()
+        err = os.Remove(frameFullName)
+        if err != nil {
+            log.Fatalf("videoFxRoutine(): Error :: An error occurted while trying to cleanup source frame %s/%s: %v", framesFullOutPath, srcFrameFile.Name(), err)
+        }
+    }
+    recombineCommand := exec.Command(
+        "ffmpeg", "-y",
+        "-framerate", "30",
+        "-i", framesFullOutPath+"/"+framesDirName+"_fx_%03d."+imgType,
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        VIDOUT+"/"+vidOutName,
+    )
+    recombineOutput, err := recombineCommand.CombinedOutput()
+    if err != nil {
+        log.Fatalf("videoFxRoutine(): An error occured while running recombineCommand -> \n\n%s\n(%v)", string(recombineOutput), err)
+    }
+    fmt.Println("\nvideoFxRoutine(): recombineCommand Output => \n\n%s\n(Successfully created %s/%s from %s frames in %s)\n", string(recombineOutput), VIDOUT, vidOutName, imgType, framesFullOutPath)
 }
 
 func main() {
-    videoFxRoutine("ants.mp4", "test")
+    videoFxRoutine("ants.mp4", "test", "test0.mp4", PNG)
 }
