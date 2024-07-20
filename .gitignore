@@ -4,3 +4,9 @@ img_out
 cargo.lock
 /target
 go.sum
+src/main.exe
+src/main.o
+src/main
+main.exe
+main.o
+main
