@@ -4,7 +4,7 @@ import (
     "fmt"
     "log"
     //"math"
-    //"go/parser"
+    "go/parser"
     "strings"
     //"strconv"
     "image"
@@ -15,6 +15,7 @@ import (
     "os"
     "os/exec"
     "io/ioutil"
+    "sync"
 )
 
 const (
@@ -86,7 +87,7 @@ func distort(x,y,w,h int, amp,freq,phase float64) {
     return dx,dy
 }*/
 
-func videoFxRoutine(videoInName,framesDirName,vidOutName,imgType string) {
+func videoFxRoutine(videoInName,framesDirName,vidOutName,imgType,expressionRed,expressionGreen,expressionBlue,expressionAlpha string, interpolationRatio,interpolationAdjust float64) {
     if imgType != PNG && imgType != JPEG {
         log.Fatalf("videoFxRoutine(): ERROR :: Entered parameter imgType = %s is not .png or .bmp; please chose either .png or .jpg", imgType)
     }
@@ -107,11 +108,53 @@ func videoFxRoutine(videoInName,framesDirName,vidOutName,imgType string) {
         log.Fatalf("videoFxRoutine(): ERROR :: An error occured while trying to read the names of frame files in %s: %v", framesFullOutPath, err)
     }
     // TODO: implement generation logic
+    var wg sync.WaitGroup
+    var EXPR,EXPG,EXPB,EXPA interface {}
+    var errR,errG,errB,errA error
+    wg.Add(4)
+    go func () {
+        defer wg.Done()
+        EXPR, errR = parser.ParseExpr(expressionRed)
+    } ()
+    go func () {
+        defer wg.Done()
+        EXPG, errG = parser.ParseExpr(expressionGreen)
+    } ()
+    go func () {
+        defer wg.Done()
+        EXPB, errB = parser.ParseExpr(expressionBlue)
+    } ()
+    go func () {
+        defer wg.Done()
+        EXPA, errA = parser.ParseExpr(expressionAlpha)
+    } ()
+    wg.Wait()
+    if errR != nil {
+        log.Fatalf("viedeoFxRoutine(): ERROR :: An error occured while parsing the expression %s for pixel Red color: %v", expressionRed, errR)
+    }
+    if errG != nil {
+        log.Fatalf("viedeoFxRoutine(): ERROR :: An error occured while parsing the expression %s for pixel Green color: %v", expressionGreen, errG)
+    }
+    if errB != nil {
+        log.Fatalf("viedeoFxRoutine(): ERROR :: An error occured while parsing the expression %s for pixel Blue color: %v", expressionBlue, errB)
+    }
+    if errA != nil {
+        log.Fatalf("viedeoFxRoutine(): ERROR :: An error occured while parsing the expression %s for pixel Alpha color: %v", expressionAlpha, errA)
+    }
+    var interpRatio float64
+    if interpolationRatio < 0.0 {
+        interpRatio = 0.0
+    } else if interpolationRatio > 1.0 {
+        interpRatio = 1.0
+    } else {
+        interpRatio = interpolationRatio
+    }
+    interpRatioAdj := interpolationAdjust / float64(len(framesFnames))
     for _, srcFrameFile := range framesFnames {
         frameFullName := framesFullOutPath+"/"+srcFrameFile.Name()
         rawFrameBytes, err := os.Open(frameFullName)
         if err != nil {
-            log.Fatalf("videoFxRoutine(): ERROR ::  An error occured while loading source frame bytes %s: %v", frameFullName, err)
+            log.Fatalf("videoFxRoutine(): ERROR :: An error occured while loading source frame bytes %s: %v", frameFullName, err)
         }
         frameImage, _, err := image.Decode(rawFrameBytes)
         if err != nil {
@@ -120,8 +163,34 @@ func videoFxRoutine(videoInName,framesDirName,vidOutName,imgType string) {
         resultFrameRgba := image.NewRGBA(image.Rect(0, 0, frameImage.Bounds().Max.X, frameImage.Bounds().Max.Y))
         for y := 0; y < frameImage.Bounds().Max.Y; y++ {
             for x := 0; x < frameImage.Bounds().Max.X; x++ {
+                vars := map[string]int{ "x": x, "y": y }
+                rTemp, err := evalExprTreeNode(EXPR, vars)
+                if err != nil {
+                    log.Fatalf("videoFxRoutine(): ERROR :: An error occured while evaluating parsed pixel Red expression %s for pixel coordinates x = %v, y = %v: %v", expressionRed, x, y, err)
+                }
+                rVal := uint8(rTemp)
+                gTemp, err := evalExprTreeNode(EXPG, vars)
+                if err != nil {
+                    log.Fatalf("videoFxRoutine(): ERROR :: An error occured while evaluating parsed pixel Green expression %s for pixel coordinates x = %v, y = %v: %v", expressionGreen, x, y, err)
+                }
+                gVal := uint8(gTemp)
+                bTemp, err := evalExprTreeNode(EXPB, vars)
+                if err != nil {
+                    log.Fatalf("videoFxRoutine(): ERROR :: An error occured while evaluating parsed pixel Blue expression %s for pixel coordinates x = %v, y = %v: %v", expressionBlue, x, y, err)
+                }
+                bVal := uint8(bTemp)
+                aTemp, err := evalExprTreeNode(EXPA, vars)
+                if err != nil {
+                    log.Fatalf("videoFxRoutine(): ERROR :: An error occured while evaluating parsed pixel Alpha expression %s for pixel coordinates x = %v, y = %v: %v", expressionAlpha, x, y, err)
+                }
+                aVal := uint8(aTemp)
                 rSrc,gSrc,bSrc,aSrc := frameImage.At(x, y).RGBA()
-                resultFrameRgba.Set(x, y, color.RGBA{uint8(rSrc), uint8(gSrc), uint8(bSrc), uint8(aSrc)}) // For now we are just copying
+                resultFrameRgba.Set(x, y, color.RGBA{
+                    uint8((interpRatio*float64(rSrc)) + ((1.0-interpRatio)*float64(rVal))), 
+                    uint8((interpRatio*float64(gSrc)) + ((1.0-interpRatio)*float64(gVal))), 
+                    uint8((interpRatio*float64(bSrc)) + ((1.0-interpRatio)*float64(bVal))),
+                    uint8((interpRatio*float64(aSrc)) + ((1.0-interpRatio)*float64(aVal))),
+                })
             }
         }
         segments := strings.Split(srcFrameFile.Name(), "_")
@@ -145,6 +214,13 @@ func videoFxRoutine(videoInName,framesDirName,vidOutName,imgType string) {
         if err != nil {
             log.Fatalf("videoFxRoutine(): Error :: An error occurted while trying to cleanup source frame %s/%s: %v", framesFullOutPath, srcFrameFile.Name(), err)
         }
+        if interpRatio + interpRatioAdj > 1.0 {
+            interpRatio = 1.0
+        } else if interpRatio + interpRatioAdj < 0.0 {
+            interpRatio = 0.0
+        } else {
+            interpRatio += interpRatioAdj
+        }
     }
     recombineCommand := exec.Command(
         "ffmpeg", "-y",
@@ -162,5 +238,5 @@ func videoFxRoutine(videoInName,framesDirName,vidOutName,imgType string) {
 }
 
 func main() {
-    videoFxRoutine("ants.mp4", "test", "test0.mp4", PNG)
+    videoFxRoutine("ants.mp4", "test", "test0.mp4", PNG, "sin(x+y)", "sin(x+y)", "sin(x+y)", "255", 0.99, -0.045)
 }
