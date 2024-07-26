@@ -63,7 +63,7 @@ func preRoutineCheck(videoInputName,framesDirName string) {
         os.MkdirAll(IMGOUT+"/"+framesDirName, 0755)
         fmt.Printf("\npreRoutineCheck(): The previous contents of directory img_out/%s were successfully cleared\n", framesDirName)
     }
-    fmt.Printf("\npreRoutineCheck(): All relevant IO directories and input video file %s exists\n", videoInputName)
+    fmt.Printf("\npreRoutineCheck(): All relevant IO directories and input video file %s exist\n", videoInputName)
 }
 
 /*func clamp(value,min,max int) int {
@@ -86,7 +86,8 @@ func distort(x,y,w,h int, amp,freq,phase float64) {
 
 func videoFxRoutine(
     videoInName,framesDirName,vidOutName,imgType,expressionRed,expressionGreen,expressionBlue,expressionAlpha string,
-    interpolationRatio,interpolationAdjust,reverbSampleRate,reverbLengthMs,reverbDecayFactor,reverbDamping float64) {
+    interpolationRatio,interpolationAdjust,reverbSampleRate,reverbLengthMs,reverbDecayFactor,reverbDamping float64,
+    useImageReverb bool) {
     if imgType != PNG && imgType != JPEG {
         log.Fatalf("videoFxRoutine(): ERROR :: Entered parameter imgType = %s is not .png or .bmp; please chose either .png or .jpg", imgType)
     }
@@ -99,9 +100,9 @@ func videoFxRoutine(
     )
     teardownOutput, err := teardownCommand.CombinedOutput()
     if err != nil {
-        log.Fatalf("videoFxRoutine(): ERROR :: An error occured while running teardownCommand -> \n\n%s\n(%v)", string(teardownOutput), err)
+        log.Fatalf("videoFxRoutine(): ERROR :: An error occured while running teardownCommand ->\n\n%s\n(%v)", string(teardownOutput), err)
     }
-    fmt.Printf("\nvideoFxRoutine(): teardownCommand Output -> \n\n%s\n(Successfully created frames from source video %s in output directory %s)\n", string(teardownOutput), vidInFullPath, framesFullOutPath)
+    fmt.Printf("\nvideoFxRoutine(): teardownCommand Output ->\n\n%s\n(Successfully created frames from source video %s in output directory %s)\n", string(teardownOutput), vidInFullPath, framesFullOutPath)
     framesFnames, err := ioutil.ReadDir(framesFullOutPath)
     if err != nil {
         log.Fatalf("videoFxRoutine(): ERROR :: An error occured while trying to read the names of frame files in %s: %v", framesFullOutPath, err)
@@ -147,7 +148,8 @@ func videoFxRoutine(
     } else {
         interpRatio = interpolationRatio
     }
-    interpRatioAdj := interpolationAdjust / float64(len(framesFnames))
+    nFilesFloat := float64(len(framesFnames))
+    interpRatioAdj := interpolationAdjust / nFilesFloat
     for _, srcFrameFile := range framesFnames {
         frameFullName := framesFullOutPath+"/"+srcFrameFile.Name()
         rawFrameBytes, err := os.Open(frameFullName)
@@ -156,7 +158,7 @@ func videoFxRoutine(
         }
         frameImage, _, err := image.Decode(rawFrameBytes)
         if err != nil {
-            log.Fatalf("videoFxRoutine(): ERROR :: An error occured while deocuding source frame bytes %s: %v", frameFullName, err)
+            log.Fatalf("videoFxRoutine(): ERROR :: An error occured while decoding source frame bytes %s: %v", frameFullName, err)
         }
         resultFrameRgba := image.NewRGBA(image.Rect(0, 0, frameImage.Bounds().Max.X, frameImage.Bounds().Max.Y))
         for y := 0; y < frameImage.Bounds().Max.Y; y++ {
@@ -191,7 +193,9 @@ func videoFxRoutine(
                 })
             }
         }
-        resultFrameRgba = imageReverb(resultFrameRgba, reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping)
+        if useImageReverb {
+            resultFrameRgba = imageReverb(resultFrameRgba, reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping)
+        }
         segments := strings.Split(srcFrameFile.Name(), "_")
         idxStr := strings.Replace(segments[len(segments)-1], "."+imgType, "", -1)
         newFrameFname := fmt.Sprintf("%s/%s_fx_%s.%s", framesFullOutPath, framesDirName, idxStr, imgType)
@@ -211,7 +215,7 @@ func videoFxRoutine(
         rawFrameBytes.Close()
         err = os.Remove(frameFullName)
         if err != nil {
-            log.Fatalf("videoFxRoutine(): Error :: An error occurted while trying to clea nup source frame %s/%s: %v", framesFullOutPath, srcFrameFile.Name(), err)
+            log.Fatalf("videoFxRoutine(): Error :: An error occurted while trying to clean up source frame %s/%s: %v", framesFullOutPath, srcFrameFile.Name(), err)
         }
         if interpRatio + interpRatioAdj > 1.0 {
             interpRatio = 1.0
@@ -231,16 +235,17 @@ func videoFxRoutine(
     )
     recombineOutput, err := recombineCommand.CombinedOutput()
     if err != nil {
-        log.Fatalf("videoFxRoutine(): An error occured while running recombineCommand -> \n\n%s\n(%v)", string(recombineOutput), err)
+        log.Fatalf("videoFxRoutine(): An error occured while running recombineCommand ->\n\n%s\n(%v)", string(recombineOutput), err)
     }
-    fmt.Println("\nvideoFxRoutine(): recombineCommand Output => \n\n%s\n(Successfully created %s/%s from %s frames in %s)\n", string(recombineOutput), VIDOUT, vidOutName, imgType, framesFullOutPath)
+    fmt.Println("\nvideoFxRoutine(): recombineCommand Output =>\n\n%s\n(Successfully created %s/%s from %s frames in %s)\n", string(recombineOutput), VIDOUT, vidOutName, imgType, framesFullOutPath)
 }
 
 func main() {
     videoFxRoutine(
-        "drive_07252024.mp4", "test", "test0.mp4", PNG, // videoInName, framesDirName, vidOutName, imgType
-        "sin(x+y)", "sin(x+y)", "sin(x+y)", "sin((x+y))", // expressionRed, expressionGreen, expressionBlue, expressionAlpha
+        "drive_07252024.mp4", "test", "test2.mp4", PNG, // videoInName, framesDirName, vidOutName, imgType
+        //"sin(x+y)", "cos(x+y)", "tan(x+y)", "cos((x*sin(tan(x) + tan(y))) + (y*sin(tan(x) - tan(y)))", // expressionRed, expressionGreen, expressionBlue, expressionAlpha
+        "255", "255", "255", "255", // testing
         1.0, 0.0, // interpolationRatio, interpolationAdjust,
-        44100.0, 0.42, 0.69, 0.15, // reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping 
+        44100.0, 0.444, 0.1, 0.15, true, // reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping, useImageReverb
     )
 }
