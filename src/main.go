@@ -3,13 +3,10 @@ package main
 import (
     "fmt"
     "log"
-    //"math"
     "go/parser"
     "strings"
-    //"strconv"
     "image"
     "image/color"
-    //"image/draw"
     "image/png"
     "image/jpeg"
     "os"
@@ -87,7 +84,9 @@ func distort(x,y,w,h int, amp,freq,phase float64) {
     return dx,dy
 }*/
 
-func videoFxRoutine(videoInName,framesDirName,vidOutName,imgType,expressionRed,expressionGreen,expressionBlue,expressionAlpha string, interpolationRatio,interpolationAdjust float64) {
+func videoFxRoutine(
+    videoInName,framesDirName,vidOutName,imgType,expressionRed,expressionGreen,expressionBlue,expressionAlpha string,
+    interpolationRatio,interpolationAdjust,reverbSampleRate,reverbLengthMs,reverbDecayFactor,reverbDamping float64) {
     if imgType != PNG && imgType != JPEG {
         log.Fatalf("videoFxRoutine(): ERROR :: Entered parameter imgType = %s is not .png or .bmp; please chose either .png or .jpg", imgType)
     }
@@ -107,7 +106,6 @@ func videoFxRoutine(videoInName,framesDirName,vidOutName,imgType,expressionRed,e
     if err != nil {
         log.Fatalf("videoFxRoutine(): ERROR :: An error occured while trying to read the names of frame files in %s: %v", framesFullOutPath, err)
     }
-    // TODO: implement generation logic
     var wg sync.WaitGroup
     var EXPR,EXPG,EXPB,EXPA interface {}
     var errR,errG,errB,errA error
@@ -193,6 +191,7 @@ func videoFxRoutine(videoInName,framesDirName,vidOutName,imgType,expressionRed,e
                 })
             }
         }
+        resultFrameRgba = imageReverb(resultFrameRgba, reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping)
         segments := strings.Split(srcFrameFile.Name(), "_")
         idxStr := strings.Replace(segments[len(segments)-1], "."+imgType, "", -1)
         newFrameFname := fmt.Sprintf("%s/%s_fx_%s.%s", framesFullOutPath, framesDirName, idxStr, imgType)
@@ -212,7 +211,7 @@ func videoFxRoutine(videoInName,framesDirName,vidOutName,imgType,expressionRed,e
         rawFrameBytes.Close()
         err = os.Remove(frameFullName)
         if err != nil {
-            log.Fatalf("videoFxRoutine(): Error :: An error occurted while trying to cleanup source frame %s/%s: %v", framesFullOutPath, srcFrameFile.Name(), err)
+            log.Fatalf("videoFxRoutine(): Error :: An error occurted while trying to clea nup source frame %s/%s: %v", framesFullOutPath, srcFrameFile.Name(), err)
         }
         if interpRatio + interpRatioAdj > 1.0 {
             interpRatio = 1.0
@@ -238,5 +237,10 @@ func videoFxRoutine(videoInName,framesDirName,vidOutName,imgType,expressionRed,e
 }
 
 func main() {
-    videoFxRoutine("ants.mp4", "test", "test0.mp4", PNG, "sin(x+y)", "sin(x+y)", "sin(x+y)", "255", 0.99, -0.045)
+    videoFxRoutine(
+        "drive_07252024.mp4", "test", "test0.mp4", PNG, // videoInName, framesDirName, vidOutName, imgType
+        "sin(x+y)", "sin(x+y)", "sin(x+y)", "sin((x+y))", // expressionRed, expressionGreen, expressionBlue, expressionAlpha
+        1.0, 0.0, // interpolationRatio, interpolationAdjust,
+        44100.0, 0.42, 0.69, 0.15, // reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping 
+    )
 }
