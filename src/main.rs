@@ -380,9 +380,9 @@ fn apply_effects(
 }
 
 fn main() -> io::Result<()> {
-  let vid_in_name = VIDIN.to_owned()+"lightningpa1.mp4";
-  let frames_dir = IMGOUT.to_owned()+"lightningpa";
-  let vid_out_name = VIDOUT.to_owned()+"lightningpa1_0.mp4";
+  let vid_in_name = VIDIN.to_owned()+"drive_07252024.mp4";
+  let frames_dir = IMGOUT.to_owned()+"test0";
+  let vid_out_name = VIDOUT.to_owned()+"test0.mp4";
   let image_type = "png";
   let interp_ratio_init = 0.6;
   let interp_ratio_adj = 0.35;
@@ -393,7 +393,7 @@ fn main() -> io::Result<()> {
   let b_multiplier = 1.0;
   let b_multiplier_adj = 1.0;
   let fx: Vec<Effect> = vec![
-    Effect::GenInterp(
+    /*Effect::GenInterp(
       interp_ratio_init, // iratio
       Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // f_rscale
       Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // f_gscale
@@ -404,7 +404,8 @@ fn main() -> io::Result<()> {
       Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // fr_theta
       Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // fg_theta
       Box::new(|x, y| ((x as u32 & y as u32) as f64) % 255.0), // fb_theta
-  ),
+    ),*/
+    Effect::DiscreteCosine(7),
   ];
   let _ = apply_effects(
     &vid_in_name, &frames_dir, &vid_out_name, &image_type, &fx,

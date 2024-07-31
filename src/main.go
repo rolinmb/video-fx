@@ -242,10 +242,10 @@ func videoFxRoutine(
 
 func main() {
     videoFxRoutine(
-        "drive_07252024.mp4", "test", "test2.mp4", PNG, // videoInName, framesDirName, vidOutName, imgType
+        "test0.mp4", "test1", "test1.mp4", PNG, // videoInName, framesDirName, vidOutName, imgType
         //"sin(x+y)", "cos(x+y)", "tan(x+y)", "cos((x*sin(tan(x) + tan(y))) + (y*sin(tan(x) - tan(y)))", // expressionRed, expressionGreen, expressionBlue, expressionAlpha
         "255", "255", "255", "255", // testing
         1.0, 0.0, // interpolationRatio, interpolationAdjust,
-        44100.0, 0.444, 0.1, 0.15, true, // reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping, useImageReverb
+        44100.0, 0.42, 0.69, 0.5, true, // reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping, useImageReverb
     )
 }
