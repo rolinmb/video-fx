@@ -87,7 +87,7 @@ func distort(x,y,w,h int, amp,freq,phase float64) {
 func videoFxRoutine(
     videoInName,framesDirName,vidOutName,imgType,expressionRed,expressionGreen,expressionBlue,expressionAlpha string,
     interpolationRatio,interpolationAdjust,reverbSampleRate,reverbLengthMs,reverbDecayFactor,reverbDamping float64,
-    useImageReverb bool) {
+    useImageReverb,applyDct,dctBefore,applyDst,dstBefore bool) {
     if imgType != PNG && imgType != JPEG {
         log.Fatalf("videoFxRoutine(): ERROR :: Entered parameter imgType = %s is not .png or .bmp; please chose either .png or .jpg", imgType)
     }
@@ -247,5 +247,7 @@ func main() {
         "255", "255", "255", "255", // testing
         1.0, 0.0, // interpolationRatio, interpolationAdjust,
         44100.0, 0.42, 0.69, 0.5, true, // reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping, useImageReverb
+        false, false, // applyDct, dctBefore
+        false, false, // applyDst, dstBefore
     )
 }
