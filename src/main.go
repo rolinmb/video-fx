@@ -3,6 +3,7 @@ package main
 import (
     "fmt"
     "log"
+    "math"
     "go/parser"
     "strings"
     "image"
@@ -66,7 +67,7 @@ func preRoutineCheck(videoInputName,framesDirName string) {
     fmt.Printf("\npreRoutineCheck(): All relevant IO directories and input video file %s exist\n", videoInputName)
 }
 
-/*func clamp(value,min,max int) int {
+func clamp(value,min,max int) int {
     if value < min {
         return min
     }
@@ -76,18 +77,18 @@ func preRoutineCheck(videoInputName,framesDirName string) {
     return value
 }
 
-func distort(x,y,w,h int, amp,freq,phase float64) {
+func distort(x,y,w,h int, amp,freq,phase float64) (int, int) {
     dx := y + int(amp * math.Sin(freq * float64(x) + phase))
     dy := x + int(amp * math.Sin(freq * float64(y) + phase))
 	dx = clamp(dx, 0, w-1)
 	dy = clamp(dy, 0, h-1)
     return dx,dy
-}*/
+}
 
 func videoFxRoutine(
     videoInName,framesDirName,vidOutName,imgType,expressionRed,expressionGreen,expressionBlue,expressionAlpha string,
-    interpolationRatio,interpolationAdjust,reverbSampleRate,reverbLengthMs,reverbDecayFactor,reverbDamping float64,
-    useImageReverb,applyDct,dctBefore,applyDst,dstBefore bool) {
+    interpolationRatio,interpolationAdjust,reverbSampleRate,reverbLengthMs,reverbDecayFactor,reverbDamping,distAmp,distFreq,distPhase float64,
+    useImageReverb,applyDistort,applyDct,dctBefore,applyDst,dstBefore bool) {
     if imgType != PNG && imgType != JPEG {
         log.Fatalf("videoFxRoutine(): ERROR :: Entered parameter imgType = %s is not .png or .bmp; please chose either .png or .jpg", imgType)
     }
@@ -163,7 +164,11 @@ func videoFxRoutine(
         resultFrameRgba := image.NewRGBA(image.Rect(0, 0, frameImage.Bounds().Max.X, frameImage.Bounds().Max.Y))
         for y := 0; y < frameImage.Bounds().Max.Y; y++ {
             for x := 0; x < frameImage.Bounds().Max.X; x++ {
-                vars := map[string]int{ "x": x, "y": y }
+                dx, dy := x, y
+                if applyDistort {
+                    dx, dy = distort(x, y, frameImage.Bounds().Max.X, frameImage.Bounds().Max.Y, distAmp, distFreq, distPhase)
+                }
+                vars := map[string]int{ "x": dx, "y": dy }
                 rTemp, err := evalExprTreeNode(EXPR, vars)
                 if err != nil {
                     log.Fatalf("videoFxRoutine(): ERROR :: An error occured while evaluating parsed pixel Red expression %s for pixel coordinates x = %v, y = %v: %v", expressionRed, x, y, err)
@@ -246,7 +251,9 @@ func main() {
         //"sin(x+y)", "cos(x+y)", "tan(x+y)", "cos((x*sin(tan(x) + tan(y))) + (y*sin(tan(x) - tan(y)))", // expressionRed, expressionGreen, expressionBlue, expressionAlpha
         "255", "255", "255", "255", // testing
         1.0, 0.0, // interpolationRatio, interpolationAdjust,
-        44100.0, 0.42, 0.69, 0.5, true, // reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping, useImageReverb
+        44100.0, 0.42, 0.69, 0.5, // reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping
+        0.0, 0.0, 0.0, // distAmp, distFreq, distPhase
+        false, false, // useImageReverb, applyDistort
         false, false, // applyDct, dctBefore
         false, false, // applyDst, dstBefore
     )
