@@ -35,7 +35,7 @@ func DCT(block [][]float64) [][]float64 {
     return dct
 }
 
-func extractBlock(img image.Image, x,y,blockSize int) [][]float64 {
+func extractBlock(img *image.RGBA, x,y,blockSize int) [][]float64 {
     block := make([][]float64, blockSize)
     for i := 0; i < blockSize; i++ {
         block[i] = make([]float64, blockSize)
@@ -69,7 +69,7 @@ func storeBlock(img *image.RGBA, block [][]float64, x,y,blockSize int) {
     }
 }
 
-func applyDct(img image.Image, blockSize int) image.Image {
+func applyDct(img *image.RGBA, blockSize int) *image.RGBA {
     bounds := img.Bounds()
     width, height := bounds.Dx(), bounds.Dy()
     dctImg := image.NewRGBA(bounds)
@@ -103,7 +103,7 @@ func DST(block [][]float64) [][]float64 {
     return dst
 }
 
-func applyDst(img image.Image, blockSize int) image.Image {
+func applyDst(img *image.RGBA, blockSize int) *image.RGBA {
     bounds := img.Bounds()
     width, height := bounds.Dx(), bounds.Dy()
     dstImg := image.NewRGBA(bounds)

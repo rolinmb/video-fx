@@ -88,7 +88,8 @@ func distort(x,y,w,h int, amp,freq,phase float64) (int, int) {
 func videoFxRoutine(
     videoInName,framesDirName,vidOutName,imgType,expressionRed,expressionGreen,expressionBlue,expressionAlpha string,
     interpolationRatio,interpolationAdjust,reverbSampleRate,reverbLengthMs,reverbDecayFactor,reverbDamping,distAmp,distFreq,distPhase float64,
-    useImageReverb,applyDistort,applyDct,dctBefore,applyDst,dstBefore bool) {
+    useImageReverb,applyDistort,applyCosine,dctBefore,applySine,dstBefore bool,
+    dctBlockSize,dstBlockSize int) {
     if imgType != PNG && imgType != JPEG {
         log.Fatalf("videoFxRoutine(): ERROR :: Entered parameter imgType = %s is not .png or .bmp; please chose either .png or .jpg", imgType)
     }
@@ -162,6 +163,12 @@ func videoFxRoutine(
             log.Fatalf("videoFxRoutine(): ERROR :: An error occured while decoding source frame bytes %s: %v", frameFullName, err)
         }
         resultFrameRgba := image.NewRGBA(image.Rect(0, 0, frameImage.Bounds().Max.X, frameImage.Bounds().Max.Y))
+        if applyCosine && dctBefore {
+            resultFrameRgba = applyDct(resultFrameRgba, dctBlockSize)
+        }
+        if applySine && dstBefore {
+            resultFrameRgba = applyDst(resultFrameRgba, dstBlockSize)
+        }
         for y := 0; y < frameImage.Bounds().Max.Y; y++ {
             for x := 0; x < frameImage.Bounds().Max.X; x++ {
                 dx, dy := x, y
@@ -200,6 +207,12 @@ func videoFxRoutine(
         }
         if useImageReverb {
             resultFrameRgba = imageReverb(resultFrameRgba, reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping)
+        }
+        if applyCosine && !dctBefore {
+            resultFrameRgba = applyDct(resultFrameRgba, dctBlockSize)
+        }
+        if applySine && !dstBefore {
+            resultFrameRgba = applyDst(resultFrameRgba, dstBlockSize)
         }
         segments := strings.Split(srcFrameFile.Name(), "_")
         idxStr := strings.Replace(segments[len(segments)-1], "."+imgType, "", -1)
@@ -254,7 +267,8 @@ func main() {
         44100.0, 0.42, 0.69, 0.5, // reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping
         0.0, 0.0, 0.0, // distAmp, distFreq, distPhase
         false, false, // useImageReverb, applyDistort
-        false, false, // applyDct, dctBefore
-        false, false, // applyDst, dstBefore
+        false, false, // applyCosine, dctBefore
+        false, false, // applySine, dstBefore
+        4, 4, // dctBlockSize, dstBlockSize
     )
 }
