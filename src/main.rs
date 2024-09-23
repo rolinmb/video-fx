@@ -380,9 +380,9 @@ fn apply_effects(
 }
 
 fn main() -> io::Result<()> {
-  let vid_in_name = VIDIN.to_owned()+"drive_07252024.mp4";
-  let frames_dir = IMGOUT.to_owned()+"test0";
-  let vid_out_name = VIDOUT.to_owned()+"test0.mp4";
+  let vid_in_name = VIDIN.to_owned()+"isntadide.mp4";
+  let frames_dir = IMGOUT.to_owned()+"test";
+  let vid_out_name = VIDOUT.to_owned()+"dide_tease2.mp4";
   let image_type = "png";
   let interp_ratio_init = 0.6;
   let interp_ratio_adj = 0.35;

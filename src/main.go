@@ -260,15 +260,18 @@ func videoFxRoutine(
 
 func main() {
     videoFxRoutine(
-        "test0.mp4", "test1", "test1.mp4", PNG, // videoInName, framesDirName, vidOutName, imgType
-        //"sin(x+y)", "cos(x+y)", "tan(x+y)", "cos((x*sin(tan(x) + tan(y))) + (y*sin(tan(x) - tan(y)))", // expressionRed, expressionGreen, expressionBlue, expressionAlpha
-        "255", "255", "255", "255", // testing
+        "cat.mp4", "test", "cat1.mp4", PNG, // videoInName, framesDirName, vidOutName, imgType
+        //"cos(x*sin(y*tan(x) << tan(y))) * y", // expressionRed
+        //"cos(x*sin(y*tan(x) << tan(y))) * y", // expressionGreen
+        //"cos(x*sin(y*tan(x) << tan(y))) * y", // expressionBlue
+        //"cos(x*sin(y*tan(x) << tan(y))) * y", // expressionAlpha
+        "255", "255", "255", "255", // testing RGBA expressions
         1.0, 0.0, // interpolationRatio, interpolationAdjust,
         44100.0, 0.42, 0.69, 0.5, // reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping
         0.0, 0.0, 0.0, // distAmp, distFreq, distPhase
-        false, false, // useImageReverb, applyDistort
+        true, false, // useImageReverb, applyDistort
         false, false, // applyCosine, dctBefore
         false, false, // applySine, dstBefore
-        4, 4, // dctBlockSize, dstBlockSize
+        7, 7, // dctBlockSize, dstBlockSize
     )
 }
