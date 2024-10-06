@@ -260,18 +260,19 @@ func videoFxRoutine(
 
 func main() {
     videoFxRoutine(
-        "cat.mp4", "test", "cat1.mp4", PNG, // videoInName, framesDirName, vidOutName, imgType
-        //"cos(x*sin(y*tan(x) << tan(y))) * y", // expressionRed
-        //"cos(x*sin(y*tan(x) << tan(y))) * y", // expressionGreen
-        //"cos(x*sin(y*tan(x) << tan(y))) * y", // expressionBlue
-        //"cos(x*sin(y*tan(x) << tan(y))) * y", // expressionAlpha
-        "255", "255", "255", "255", // testing RGBA expressions
-        1.0, 0.0, // interpolationRatio, interpolationAdjust,
+        "blboarding.mp4", "test", "blboarding0.mp4", PNG, // videoInName, framesDirName, vidOutName, imgType
+        "pow((pow(x, 2) << pow(y, 2)), 2) << (1 /(1+(x*y)))", // expressionRed
+        "pow((pow(x, 2) << pow(y, 2)), 2) << (1 /(1+(x*y)))", // expressionGreen
+        "pow((pow(x, 2) << pow(y, 2)), 2) << (1 /(1+(x*y)))", // expressionBlue
+        "pow((pow(x, 2) << pow(y, 2)), 2) << (1 /(1+(x*y)))", // expressionAlpha
+        //"255", "255", "255", "255", // testing RGBA expressions
+        //0.9955, -0.002, // interpolationRatio, interpolationAdjust,
+        1.0, 0.0, // testing interpolation settings
         44100.0, 0.42, 0.69, 0.5, // reverbSampleRate, reverbLengthMs, reverbDecayFactor, reverbDamping
         0.0, 0.0, 0.0, // distAmp, distFreq, distPhase
-        true, false, // useImageReverb, applyDistort
+        false, false, // useImageReverb, applyDistort
         false, false, // applyCosine, dctBefore
-        false, false, // applySine, dstBefore
-        7, 7, // dctBlockSize, dstBlockSize
+        true, false, // applySine, dstBefore
+        6, 6, // dctBlockSize, dstBlockSize
     )
 }

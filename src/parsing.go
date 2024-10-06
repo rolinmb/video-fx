@@ -88,7 +88,7 @@ func evalExprTreeNode(node interface{}, vars map[string]int) (float64, error) {
         }
         right, err := evalExprTreeNode(n.Y, vars)
         if err != nil {
-        return 0, err
+            return 0, err
         }
         switch n.Op {
         case token.ADD:
@@ -119,7 +119,7 @@ func evalExprTreeNode(node interface{}, vars map[string]int) (float64, error) {
     case *ast.UnaryExpr:
         operand, err := evalExprTreeNode(n.X, vars)
         if err != nil {
-        return 0, err
+            return 0, err
         }
         switch n.Op {
         case token.ADD:
